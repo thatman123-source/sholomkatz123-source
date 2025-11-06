@@ -1,0 +1,59 @@
+/* Background gradient */
+body {
+    margin: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(to bottom, #87CEEB, #FF7F50);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+}
+
+/* Centered card */
+.card {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    padding: 40px 30px;
+    max-width: 600px;
+    text-align: center;
+    color: #fff;
+    transition: transform 0.3s;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+h1 {
+    font-size: 3em;
+    margin-bottom: 0.3em;
+}
+
+p {
+    font-size: 1.3em;
+    line-height: 1.6;
+}
+
+a {
+    color: #fff;
+    text-decoration: underline;
+    transition: color 0.3s;
+}
+
+a:hover {
+    color: #FFD700;
+}
+
+footer {
+    margin-top: 30px;
+    font-size: 1em;
+}
+
+@media (max-width: 500px) {
+    h1 { font-size: 2.2em; }
+    p { font-size: 1.1em; }
+    .card { padding: 30px 20px; }
+}
