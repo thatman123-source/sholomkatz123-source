@@ -19,7 +19,7 @@ import { Banknote, Moon, Sun, LogOut, User, LayoutDashboard, Archive } from "luc
 import { getBalances } from "@/lib/cash-store"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
-import type { DailyEntry, SafeBalances } from "@/lib/types"
+import type { SafeBalances } from "@/lib/types"
 import type { User as SupabaseUser } from "@supabase/supabase-js"
 
 interface CashReconciliationDashboardProps {
@@ -33,15 +33,19 @@ export function CashReconciliationDashboard({ user }: CashReconciliationDashboar
     lastUpdated: new Date().toISOString(),
   })
   const [refreshTrigger, setRefreshTrigger] = useState(0)
-  const [editingEntry, setEditingEntry] = useState<DailyEntry | null>(null)
   const [isDark, setIsDark] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
   const [activeTab, setActiveTab] = useState("dashboard")
   const router = useRouter()
 
   useEffect(() => {
-    setBalances(getBalances())
-    setIsLoaded(true)
+    const loadBalances = async () => {
+      const newBalances = await getBalances()
+      setBalances(newBalances)
+      setIsLoaded(true)
+    }
+    loadBalances()
+
     const savedTheme = localStorage.getItem("theme")
     if (savedTheme === "dark") {
       setIsDark(true)
@@ -49,15 +53,10 @@ export function CashReconciliationDashboard({ user }: CashReconciliationDashboar
     }
   }, [])
 
-  const handleRefresh = () => {
-    setBalances(getBalances())
+  const handleRefresh = async () => {
+    const newBalances = await getBalances()
+    setBalances(newBalances)
     setRefreshTrigger((prev) => prev + 1)
-  }
-
-  const handleEdit = (entry: DailyEntry) => {
-    setEditingEntry(entry)
-    setActiveTab("dashboard")
-    window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
   const toggleTheme = () => {
@@ -158,12 +157,7 @@ export function CashReconciliationDashboard({ user }: CashReconciliationDashboar
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2">
-                <DailyEntryForm
-                  balances={balances}
-                  onEntrySaved={handleRefresh}
-                  editingEntry={editingEntry}
-                  onCancelEdit={() => setEditingEntry(null)}
-                />
+                <DailyEntryForm balances={balances} onEntrySaved={handleRefresh} />
               </div>
               <div>
                 <BackSafeWithdrawalSection
@@ -174,7 +168,7 @@ export function CashReconciliationDashboard({ user }: CashReconciliationDashboar
               </div>
             </div>
 
-            <ReconciliationHistory onEdit={handleEdit} refreshTrigger={refreshTrigger} />
+            <ReconciliationHistory refreshTrigger={refreshTrigger} />
           </TabsContent>
 
           <TabsContent value="archives" className="mt-0">

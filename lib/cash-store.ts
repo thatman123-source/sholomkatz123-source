@@ -1,176 +1,384 @@
+import { createClient } from "@/lib/supabase/client"
 import type { DailyEntry, BackSafeWithdrawal, SafeBalances, MonthlyArchive, BackSafeTransaction } from "./types"
 
-const ENTRIES_KEY = "cash_reconciliation_entries"
-const WITHDRAWALS_KEY = "back_safe_withdrawals"
-const BALANCES_KEY = "safe_balances"
-const ARCHIVES_KEY = "monthly_archives"
-const TRANSACTIONS_KEY = "back_safe_transactions"
+const supabase = createClient()
 
-export function getEntries(): DailyEntry[] {
-  if (typeof window === "undefined") return []
-  const data = localStorage.getItem(ENTRIES_KEY)
-  return data ? JSON.parse(data) : []
+// Get current user
+async function getCurrentUser() {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  return user
 }
 
-export function saveEntry(entry: DailyEntry): void {
-  const entries = getEntries()
-  const existingIndex = entries.findIndex((e) => e.id === entry.id)
-  if (existingIndex >= 0) {
-    entries[existingIndex] = entry
-  } else {
-    entries.unshift(entry)
+export async function getEntries(): Promise<DailyEntry[]> {
+  const user = await getCurrentUser()
+  if (!user) return []
+
+  const { data, error } = await supabase
+    .from("daily_entries")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("date", { ascending: false })
+
+  if (error) {
+    console.error("Error fetching entries:", error)
+    return []
   }
-  localStorage.setItem(ENTRIES_KEY, JSON.stringify(entries))
+
+  return (
+    data?.map((row) => ({
+      id: row.id,
+      date: row.date,
+      cashIn: row.cash_in,
+      deposited: row.deposited,
+      toBackSafe: row.to_back_safe,
+      leftInFront: row.actual_left_in_front,
+      expectedFrontSafe: row.left_in_front || 0,
+      difference: row.difference,
+      isBalanced: Math.abs(row.difference) < 0.01,
+      notes: row.discrepancy_reason,
+      manuallyApproved: row.manually_approved,
+      approvalNote: row.approval_note,
+      approvedAt: row.approved_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })) || []
+  )
 }
 
-export function deleteEntry(id: string): void {
-  const entries = getEntries().filter((e) => e.id !== id)
-  localStorage.setItem(ENTRIES_KEY, JSON.stringify(entries))
+export async function saveEntry(entry: DailyEntry): Promise<void> {
+  const user = await getCurrentUser()
+  if (!user) return
+
+  const { error } = await supabase.from("daily_entries").upsert({
+    id: entry.id,
+    user_id: user.id,
+    date: entry.date,
+    cash_in: entry.cashIn,
+    deposited: entry.deposited,
+    to_back_safe: entry.toBackSafe,
+    actual_left_in_front: entry.leftInFront,
+    left_in_front: entry.expectedFrontSafe,
+    difference: entry.difference,
+    discrepancy_reason: entry.notes,
+    manually_approved: entry.manuallyApproved || false,
+    approval_note: entry.approvalNote,
+    approved_at: entry.approvedAt,
+    updated_at: new Date().toISOString(),
+  })
+
+  if (error) console.error("Error saving entry:", error)
 }
 
-export function approveEntry(id: string, approvalNote: string): void {
-  const entries = getEntries()
-  const entryIndex = entries.findIndex((e) => e.id === id)
-  if (entryIndex >= 0) {
-    entries[entryIndex] = {
-      ...entries[entryIndex],
-      manuallyApproved: true,
-      approvalNote,
-      approvedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+export async function deleteEntry(id: string): Promise<void> {
+  const user = await getCurrentUser()
+  if (!user) return
+
+  const { error } = await supabase.from("daily_entries").delete().eq("id", id).eq("user_id", user.id)
+
+  if (error) console.error("Error deleting entry:", error)
+}
+
+export async function approveEntry(id: string, approvalNote: string): Promise<void> {
+  const user = await getCurrentUser()
+  if (!user) return
+
+  const { error } = await supabase
+    .from("daily_entries")
+    .update({
+      manually_approved: true,
+      approval_note: approvalNote,
+      approved_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("user_id", user.id)
+
+  if (error) console.error("Error approving entry:", error)
+}
+
+export async function removeApproval(id: string): Promise<void> {
+  const user = await getCurrentUser()
+  if (!user) return
+
+  const { error } = await supabase
+    .from("daily_entries")
+    .update({
+      manually_approved: false,
+      approval_note: null,
+      approved_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("user_id", user.id)
+
+  if (error) console.error("Error removing approval:", error)
+}
+
+export async function getWithdrawals(): Promise<BackSafeWithdrawal[]> {
+  const user = await getCurrentUser()
+  if (!user) return []
+
+  const { data, error } = await supabase
+    .from("back_safe_withdrawals")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("date", { ascending: false })
+
+  if (error) {
+    console.error("Error fetching withdrawals:", error)
+    return []
+  }
+
+  return (
+    data?.map((row) => ({
+      id: row.id,
+      date: row.date,
+      amount: row.amount,
+      reason: row.reason,
+      createdAt: row.created_at,
+    })) || []
+  )
+}
+
+export async function saveWithdrawal(withdrawal: BackSafeWithdrawal): Promise<void> {
+  const user = await getCurrentUser()
+  if (!user) return
+
+  const { error } = await supabase.from("back_safe_withdrawals").upsert({
+    id: withdrawal.id,
+    user_id: user.id,
+    date: withdrawal.date,
+    amount: withdrawal.amount,
+    reason: withdrawal.reason,
+    updated_at: new Date().toISOString(),
+  })
+
+  if (error) console.error("Error saving withdrawal:", error)
+
+  // Also save as a transaction
+  await saveBackSafeTransaction({
+    id: crypto.randomUUID(),
+    date: withdrawal.date,
+    type: "withdrawal",
+    amount: withdrawal.amount,
+    reason: withdrawal.reason,
+    withdrawalId: withdrawal.id,
+    createdAt: new Date().toISOString(),
+  })
+}
+
+export async function deleteWithdrawal(id: string): Promise<void> {
+  const user = await getCurrentUser()
+  if (!user) return
+
+  const { error } = await supabase.from("back_safe_withdrawals").delete().eq("id", id).eq("user_id", user.id)
+
+  if (error) console.error("Error deleting withdrawal:", error)
+
+  // Delete associated transaction
+  await supabase.from("back_safe_transactions").delete().eq("withdrawal_id", id)
+}
+
+export async function updateWithdrawal(id: string, amount: number, reason: string): Promise<void> {
+  const user = await getCurrentUser()
+  if (!user) return
+
+  const { error } = await supabase
+    .from("back_safe_withdrawals")
+    .update({ amount, reason, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("user_id", user.id)
+
+  if (error) console.error("Error updating withdrawal:", error)
+}
+
+export async function getBalances(): Promise<SafeBalances> {
+  const user = await getCurrentUser()
+  if (!user) {
+    return {
+      frontSafe: 0,
+      backSafe: 0,
+      lastUpdated: new Date().toISOString(),
     }
-    localStorage.setItem(ENTRIES_KEY, JSON.stringify(entries))
+  }
+
+  const [entriesData, withdrawalsData, transactionsData] = await Promise.all([
+    getEntries(),
+    getWithdrawals(),
+    getBackSafeTransactions(),
+  ])
+
+  // Calculate front safe from latest entry
+  const latestEntry = entriesData[0]
+  const frontSafe = latestEntry?.leftInFront ?? 0
+
+  // Calculate back safe from transactions
+  let backSafe = 0
+  transactionsData.forEach((t) => {
+    if (t.type === "deposit") backSafe += t.amount
+    if (t.type === "withdrawal") backSafe -= t.amount
+  })
+
+  return {
+    frontSafe,
+    backSafe,
+    lastUpdated: new Date().toISOString(),
   }
 }
 
-export function removeApproval(id: string): void {
-  const entries = getEntries()
-  const entryIndex = entries.findIndex((e) => e.id === id)
-  if (entryIndex >= 0) {
-    entries[entryIndex] = {
-      ...entries[entryIndex],
-      manuallyApproved: false,
-      approvalNote: undefined,
-      approvedAt: undefined,
-      updatedAt: new Date().toISOString(),
-    }
-    localStorage.setItem(ENTRIES_KEY, JSON.stringify(entries))
-  }
-}
-
-export function getWithdrawals(): BackSafeWithdrawal[] {
-  if (typeof window === "undefined") return []
-  const data = localStorage.getItem(WITHDRAWALS_KEY)
-  return data ? JSON.parse(data) : []
-}
-
-export function saveWithdrawal(withdrawal: BackSafeWithdrawal): void {
-  const withdrawals = getWithdrawals()
-  const existingIndex = withdrawals.findIndex((w) => w.id === withdrawal.id)
-  if (existingIndex >= 0) {
-    withdrawals[existingIndex] = withdrawal
-  } else {
-    withdrawals.unshift(withdrawal)
-  }
-  localStorage.setItem(WITHDRAWALS_KEY, JSON.stringify(withdrawals))
-}
-
-export function deleteWithdrawal(id: string): void {
-  const withdrawals = getWithdrawals().filter((w) => w.id !== id)
-  localStorage.setItem(WITHDRAWALS_KEY, JSON.stringify(withdrawals))
-}
-
-export function getBalances(): SafeBalances {
-  if (typeof window === "undefined") {
-    return { frontSafe: 0, backSafe: 0, lastUpdated: new Date().toISOString() }
-  }
-  const data = localStorage.getItem(BALANCES_KEY)
-  return data ? JSON.parse(data) : { frontSafe: 0, backSafe: 0, lastUpdated: new Date().toISOString() }
-}
-
-export function saveBalances(balances: SafeBalances): void {
-  localStorage.setItem(BALANCES_KEY, JSON.stringify(balances))
-}
-
-export function calculateExpectedFrontSafe(
+export async function calculateExpectedFrontSafe(
   previousBalance: number,
   cashIn: number,
   deposited: number,
   toBackSafe: number,
-): number {
+): Promise<number> {
   return previousBalance + cashIn - deposited - toBackSafe
 }
 
-export function getLastEntryForDate(date: string): DailyEntry | undefined {
-  const entries = getEntries()
+export async function getLastEntryForDate(date: string): Promise<DailyEntry | undefined> {
+  const entries = await getEntries()
   return entries.find((e) => e.date === date)
 }
 
-export function getPreviousDayBalance(): number {
-  const entries = getEntries()
-  if (entries.length === 0) return getBalances().frontSafe
+export async function getPreviousDayBalance(): Promise<number> {
+  const entries = await getEntries()
+  if (entries.length === 0) {
+    const balances = await getBalances()
+    return balances.frontSafe
+  }
   return entries[0].leftInFront
 }
 
-export function getBackSafeTransactions(): BackSafeTransaction[] {
-  if (typeof window === "undefined") return []
-  const data = localStorage.getItem(TRANSACTIONS_KEY)
-  return data ? JSON.parse(data) : []
+export async function getBackSafeTransactions(): Promise<BackSafeTransaction[]> {
+  const user = await getCurrentUser()
+  if (!user) return []
+
+  const { data, error } = await supabase
+    .from("back_safe_transactions")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("date", { ascending: false })
+
+  if (error) {
+    console.error("Error fetching transactions:", error)
+    return []
+  }
+
+  return (
+    data?.map((row) => ({
+      id: row.id,
+      date: row.date,
+      type: row.type,
+      amount: row.amount,
+      reason: row.reason,
+      fromEntryId: row.entry_id,
+      withdrawalId: row.withdrawal_id,
+      createdAt: row.created_at,
+    })) || []
+  )
 }
 
-export function saveBackSafeTransaction(transaction: BackSafeTransaction): void {
-  const transactions = getBackSafeTransactions()
-  transactions.unshift(transaction)
-  localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(transactions))
+export async function saveBackSafeTransaction(transaction: BackSafeTransaction): Promise<void> {
+  const user = await getCurrentUser()
+  if (!user) return
+
+  const { error } = await supabase.from("back_safe_transactions").insert({
+    id: transaction.id,
+    user_id: user.id,
+    date: transaction.date,
+    type: transaction.type,
+    amount: transaction.amount,
+    reason: transaction.reason,
+    entry_id: transaction.fromEntryId,
+    withdrawal_id: transaction.withdrawalId,
+  })
+
+  if (error) console.error("Error saving transaction:", error)
 }
 
-export function getBackSafeTransactionsForMonth(month: string): BackSafeTransaction[] {
-  const transactions = getBackSafeTransactions()
+export async function getBackSafeTransactionsForMonth(month: string): Promise<BackSafeTransaction[]> {
+  const transactions = await getBackSafeTransactions()
   return transactions.filter((t) => t.date.startsWith(month))
 }
 
-export function getArchives(): MonthlyArchive[] {
-  if (typeof window === "undefined") return []
-  const data = localStorage.getItem(ARCHIVES_KEY)
-  return data ? JSON.parse(data) : []
+export async function getArchives(): Promise<MonthlyArchive[]> {
+  const user = await getCurrentUser()
+  if (!user) return []
+
+  const { data, error } = await supabase
+    .from("monthly_archives")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("month", { ascending: false })
+
+  if (error) {
+    console.error("Error fetching archives:", error)
+    return []
+  }
+
+  return (
+    data?.map((row) => ({
+      month: row.month,
+      startingFrontSafe: row.starting_front_safe,
+      startingBackSafe: row.starting_back_safe,
+      endingFrontSafe: row.ending_front_safe,
+      endingBackSafe: row.ending_back_safe,
+      entries: [],
+      withdrawals: [],
+      isClosed: row.is_closed,
+      closedAt: row.closed_at,
+    })) || []
+  )
 }
 
-export function saveArchive(archive: MonthlyArchive): void {
-  const archives = getArchives()
-  const existingIndex = archives.findIndex((a) => a.month === archive.month)
-  if (existingIndex >= 0) {
-    archives[existingIndex] = archive
-  } else {
-    archives.unshift(archive)
-  }
-  // Sort archives by month descending
-  archives.sort((a, b) => b.month.localeCompare(a.month))
-  localStorage.setItem(ARCHIVES_KEY, JSON.stringify(archives))
+export async function saveArchive(archive: MonthlyArchive): Promise<void> {
+  const user = await getCurrentUser()
+  if (!user) return
+
+  const { error } = await supabase.from("monthly_archives").upsert({
+    user_id: user.id,
+    month: archive.month,
+    starting_front_safe: archive.startingFrontSafe,
+    starting_back_safe: archive.startingBackSafe,
+    ending_front_safe: archive.endingFrontSafe,
+    ending_back_safe: archive.endingBackSafe,
+    is_closed: archive.isClosed,
+    closed_at: archive.closedAt,
+    updated_at: new Date().toISOString(),
+  })
+
+  if (error) console.error("Error saving archive:", error)
 }
 
 export function getCurrentMonth(): string {
   return new Date().toISOString().slice(0, 7)
 }
 
-export function getEntriesForMonth(month: string): DailyEntry[] {
-  const entries = getEntries()
+export async function getEntriesForMonth(month: string): Promise<DailyEntry[]> {
+  const entries = await getEntries()
   return entries.filter((e) => e.date.startsWith(month))
 }
 
-export function getWithdrawalsForMonth(month: string): BackSafeWithdrawal[] {
-  const withdrawals = getWithdrawals()
+export async function getWithdrawalsForMonth(month: string): Promise<BackSafeWithdrawal[]> {
+  const withdrawals = await getWithdrawals()
   return withdrawals.filter((w) => w.date.startsWith(month))
 }
 
-export function closeMonth(month: string): MonthlyArchive | null {
-  const balances = getBalances()
-  const entries = getEntriesForMonth(month)
-  const withdrawals = getWithdrawalsForMonth(month)
+export async function closeMonth(month: string): Promise<MonthlyArchive | null> {
+  const user = await getCurrentUser()
+  if (!user) return null
+
+  const [balances, entries, withdrawals, archives] = await Promise.all([
+    getBalances(),
+    getEntriesForMonth(month),
+    getWithdrawalsForMonth(month),
+    getArchives(),
+  ])
 
   if (entries.length === 0) return null
 
-  // Get starting balances from previous archive or default to 0
-  const archives = getArchives()
   const previousArchive = archives.find((a) => a.month < month && a.isClosed)
 
   const startingFrontSafe = previousArchive?.endingFrontSafe ?? 0
@@ -188,12 +396,12 @@ export function closeMonth(month: string): MonthlyArchive | null {
     closedAt: new Date().toISOString(),
   }
 
-  saveArchive(archive)
+  await saveArchive(archive)
   return archive
 }
 
-export function getMonthStartingBalances(month: string): { frontSafe: number; backSafe: number } {
-  const archives = getArchives()
+export async function getMonthStartingBalances(month: string): Promise<{ frontSafe: number; backSafe: number }> {
+  const archives = await getArchives()
   const previousArchive = archives
     .filter((a) => a.month < month && a.isClosed)
     .sort((a, b) => b.month.localeCompare(a.month))[0]
@@ -208,19 +416,20 @@ export function getMonthStartingBalances(month: string): { frontSafe: number; ba
   return { frontSafe: 0, backSafe: 0 }
 }
 
-export function getAvailableMonths(): string[] {
-  const entries = getEntries()
-  const archives = getArchives()
+export async function getAvailableMonths(): Promise<string[]> {
+  const [entries, archives] = await Promise.all([getEntries(), getArchives()])
   const months = new Set<string>()
 
-  // Add current month
   months.add(getCurrentMonth())
 
-  // Add months from entries
   entries.forEach((e) => months.add(e.date.slice(0, 7)))
-
-  // Add months from archives
   archives.forEach((a) => months.add(a.month))
 
   return Array.from(months).sort((a, b) => b.localeCompare(a))
+}
+
+// Supabase handles persistence automatically through entry/transaction saves
+export async function saveBalances(_balances: SafeBalances): Promise<void> {
+  // Balances are calculated from entries and transactions, no explicit save needed
+  return Promise.resolve()
 }
