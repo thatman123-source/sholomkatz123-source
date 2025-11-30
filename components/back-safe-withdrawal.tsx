@@ -30,11 +30,11 @@ import { ArrowUpFromLine, Plus, Minus, ArrowDownToLine, TrendingUp, TrendingDown
 import type { BackSafeWithdrawal, SafeBalances, BackSafeTransaction } from "@/lib/types"
 import {
   saveWithdrawal,
-  saveBalances,
   getWithdrawals,
   deleteWithdrawal,
   updateWithdrawal,
   getBackSafeTransactions,
+  getBalances,
 } from "@/lib/cash-store"
 
 interface BackSafeWithdrawalProps {
@@ -57,20 +57,30 @@ export function BackSafeWithdrawalSection({ balances, onWithdrawal, refreshTrigg
   const [editReason, setEditReason] = useState("")
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [originalAmount, setOriginalAmount] = useState(0)
+  const [currentBackSafe, setCurrentBackSafe] = useState(balances.backSafe)
 
   useEffect(() => {
     const loadData = async () => {
-      const [withdrawalsData, transactionsData] = await Promise.all([getWithdrawals(), getBackSafeTransactions()])
+      const [withdrawalsData, transactionsData, latestBalances] = await Promise.all([
+        getWithdrawals(),
+        getBackSafeTransactions(),
+        getBalances(),
+      ])
 
       setWithdrawals(withdrawalsData)
       setTransactions(
         transactionsData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
       )
+      setCurrentBackSafe(latestBalances.backSafe)
       setIsLoaded(true)
     }
 
     loadData()
   }, [refreshTrigger])
+
+  useEffect(() => {
+    setCurrentBackSafe(balances.backSafe)
+  }, [balances.backSafe])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -91,7 +101,7 @@ export function BackSafeWithdrawalSection({ balances, onWithdrawal, refreshTrigg
 
     const amountNum = Number.parseFloat(amount) || 0
 
-    if (amountNum > balances.backSafe) {
+    if (amountNum > currentBackSafe) {
       alert("Cannot withdraw more than the current back safe balance")
       return
     }
@@ -105,13 +115,6 @@ export function BackSafeWithdrawalSection({ balances, onWithdrawal, refreshTrigg
     }
 
     await saveWithdrawal(withdrawal)
-
-    const newBalances: SafeBalances = {
-      ...balances,
-      backSafe: balances.backSafe - amountNum,
-      lastUpdated: new Date().toISOString(),
-    }
-    await saveBalances(newBalances)
 
     setAmount("")
     setReason("")
@@ -137,19 +140,12 @@ export function BackSafeWithdrawalSection({ balances, onWithdrawal, refreshTrigg
     const newAmount = Number.parseFloat(editAmount) || 0
     const amountDifference = newAmount - originalAmount
 
-    if (amountDifference > balances.backSafe) {
+    if (amountDifference > currentBackSafe) {
       alert("Cannot withdraw more than the current back safe balance")
       return
     }
 
     await updateWithdrawal(editingWithdrawal.id, newAmount, editReason)
-
-    const newBalances: SafeBalances = {
-      ...balances,
-      backSafe: balances.backSafe - amountDifference,
-      lastUpdated: new Date().toISOString(),
-    }
-    await saveBalances(newBalances)
 
     setIsEditOpen(false)
     setEditingWithdrawal(null)
@@ -188,7 +184,7 @@ export function BackSafeWithdrawalSection({ balances, onWithdrawal, refreshTrigg
             </div>
             <div>
               <CardTitle className="text-lg">Back Safe</CardTitle>
-              <p className="text-2xl font-bold font-mono mt-1">{formatCurrency(balances.backSafe)}</p>
+              <p className="text-2xl font-bold font-mono mt-1">{formatCurrency(currentBackSafe)}</p>
             </div>
           </div>
           <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -202,7 +198,7 @@ export function BackSafeWithdrawalSection({ balances, onWithdrawal, refreshTrigg
               <DialogHeader>
                 <DialogTitle>Withdraw from Back Safe</DialogTitle>
                 <DialogDescription>
-                  Current balance: <span className="font-mono font-medium">{formatCurrency(balances.backSafe)}</span>
+                  Current balance: <span className="font-mono font-medium">{formatCurrency(currentBackSafe)}</span>
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4 pt-2">
@@ -215,7 +211,7 @@ export function BackSafeWithdrawalSection({ balances, onWithdrawal, refreshTrigg
                       type="number"
                       step="0.01"
                       min="0"
-                      max={balances.backSafe}
+                      max={currentBackSafe}
                       placeholder="0.00"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
@@ -358,6 +354,7 @@ export function BackSafeWithdrawalSection({ balances, onWithdrawal, refreshTrigg
           </TabsContent>
         </Tabs>
 
+        {/* ... existing dialogs ... */}
         <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>

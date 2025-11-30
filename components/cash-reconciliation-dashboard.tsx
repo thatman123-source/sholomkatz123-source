@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { SafeBalanceCards } from "@/components/safe-balance-cards"
 import { DailyEntryForm } from "@/components/daily-entry-form"
 import { BackSafeWithdrawalSection } from "@/components/back-safe-withdrawal"
@@ -15,11 +15,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Banknote, Moon, Sun, LogOut, User, LayoutDashboard, Archive } from "lucide-react"
+import { Banknote, Moon, Sun, LogOut, User, LayoutDashboard, Archive, RefreshCw } from "lucide-react"
 import { getBalances } from "@/lib/cash-store"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
-import type { SafeBalances } from "@/lib/types"
+import type { SafeBalances, DailyEntry } from "@/lib/types"
 import type { User as SupabaseUser } from "@supabase/supabase-js"
 
 interface CashReconciliationDashboardProps {
@@ -36,7 +36,17 @@ export function CashReconciliationDashboard({ user }: CashReconciliationDashboar
   const [isDark, setIsDark] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
   const [activeTab, setActiveTab] = useState("dashboard")
+  const [editingEntry, setEditingEntry] = useState<DailyEntry | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const router = useRouter()
+
+  const refreshData = useCallback(async () => {
+    setIsRefreshing(true)
+    const newBalances = await getBalances()
+    setBalances(newBalances)
+    setRefreshTrigger((prev) => prev + 1)
+    setIsRefreshing(false)
+  }, [])
 
   useEffect(() => {
     const loadBalances = async () => {
@@ -54,9 +64,18 @@ export function CashReconciliationDashboard({ user }: CashReconciliationDashboar
   }, [])
 
   const handleRefresh = async () => {
-    const newBalances = await getBalances()
-    setBalances(newBalances)
-    setRefreshTrigger((prev) => prev + 1)
+    await refreshData()
+    setEditingEntry(null)
+  }
+
+  const handleEditEntry = (entry: DailyEntry) => {
+    setEditingEntry(entry)
+    // Scroll to form
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  const handleCancelEdit = () => {
+    setEditingEntry(null)
   }
 
   const toggleTheme = () => {
@@ -102,6 +121,17 @@ export function CashReconciliationDashboard({ user }: CashReconciliationDashboar
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={refreshData}
+              disabled={isRefreshing}
+              className="rounded-full h-10 w-10 transition-all hover:shadow-md bg-transparent"
+            >
+              <RefreshCw className={`h-[1.2rem] w-[1.2rem] ${isRefreshing ? "animate-spin" : ""}`} />
+              <span className="sr-only">Refresh data</span>
+            </Button>
+
             <Button
               variant="outline"
               size="icon"
@@ -157,7 +187,12 @@ export function CashReconciliationDashboard({ user }: CashReconciliationDashboar
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2">
-                <DailyEntryForm balances={balances} onEntrySaved={handleRefresh} />
+                <DailyEntryForm
+                  balances={balances}
+                  onEntrySaved={handleRefresh}
+                  editingEntry={editingEntry}
+                  onCancelEdit={handleCancelEdit}
+                />
               </div>
               <div>
                 <BackSafeWithdrawalSection
@@ -168,7 +203,7 @@ export function CashReconciliationDashboard({ user }: CashReconciliationDashboar
               </div>
             </div>
 
-            <ReconciliationHistory refreshTrigger={refreshTrigger} />
+            <ReconciliationHistory refreshTrigger={refreshTrigger} onEdit={handleEditEntry} />
           </TabsContent>
 
           <TabsContent value="archives" className="mt-0">

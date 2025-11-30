@@ -40,7 +40,6 @@ export function ReconciliationHistory({ refreshTrigger, onEdit }: Reconciliation
   const [entries, setEntries] = useState<DailyEntry[]>([])
   const [isLoaded, setIsLoaded] = useState(false)
   const [showAll, setShowAll] = useState(false)
-  const [lastRefresh, setLastRefresh] = useState(0)
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false)
   const [entryToApprove, setEntryToApprove] = useState<DailyEntry | null>(null)
   const [approvalNote, setApprovalNote] = useState("")
@@ -50,13 +49,9 @@ export function ReconciliationHistory({ refreshTrigger, onEdit }: Reconciliation
       const data = await getEntries()
       setEntries(data)
       setIsLoaded(true)
-      setLastRefresh(refreshTrigger)
     }
-
-    if (!isLoaded || lastRefresh !== refreshTrigger) {
-      loadEntries()
-    }
-  }, [refreshTrigger, isLoaded, lastRefresh])
+    loadEntries()
+  }, [refreshTrigger])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -74,7 +69,9 @@ export function ReconciliationHistory({ refreshTrigger, onEdit }: Reconciliation
   }
 
   const handleDelete = async (id: string) => {
-    if (confirm("Are you sure you want to delete this entry?")) {
+    if (
+      confirm("Are you sure you want to delete this entry? This will also remove any associated back safe transfer.")
+    ) {
       await deleteEntry(id)
       const updated = await getEntries()
       setEntries(updated)
@@ -109,6 +106,18 @@ export function ReconciliationHistory({ refreshTrigger, onEdit }: Reconciliation
   const displayedEntries = showAll ? entries : entries.slice(0, 7)
 
   const isEntryOk = (entry: DailyEntry) => entry.isBalanced || entry.manuallyApproved
+
+  if (!isLoaded) {
+    return (
+      <Card className="border-0 shadow-lg">
+        <CardContent className="py-12">
+          <div className="flex justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <>
@@ -213,7 +222,6 @@ export function ReconciliationHistory({ refreshTrigger, onEdit }: Reconciliation
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            {/* Show approve button only for unbalanced, non-approved entries */}
                             {!entry.isBalanced && !entry.manuallyApproved && (
                               <TooltipProvider>
                                 <Tooltip>
@@ -232,7 +240,6 @@ export function ReconciliationHistory({ refreshTrigger, onEdit }: Reconciliation
                                 </Tooltip>
                               </TooltipProvider>
                             )}
-                            {/* Show remove approval button for manually approved entries */}
                             {entry.manuallyApproved && (
                               <TooltipProvider>
                                 <Tooltip>
@@ -251,26 +258,38 @@ export function ReconciliationHistory({ refreshTrigger, onEdit }: Reconciliation
                                 </Tooltip>
                               </TooltipProvider>
                             )}
-                            {onEdit && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => onEdit(entry)}
-                                className="h-8 w-8 hover:bg-primary/10 hover:text-primary"
-                              >
-                                <Edit className="h-4 w-4" />
-                                <span className="sr-only">Edit entry</span>
-                              </Button>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDelete(entry.id)}
-                              className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              <span className="sr-only">Delete entry</span>
-                            </Button>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => onEdit?.(entry)}
+                                    className="h-8 w-8 hover:bg-primary/10 hover:text-primary"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                    <span className="sr-only">Edit entry</span>
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Edit entry</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleDelete(entry.id)}
+                                    className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    <span className="sr-only">Delete entry</span>
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Delete entry</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           </div>
                         </TableCell>
                       </TableRow>
